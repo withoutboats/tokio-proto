@@ -187,16 +187,17 @@ fn serve<P, Kind, F, S>(binder: Arc<P>, addr: SocketAddr, workers: usize, new_se
     let listener = listener(&addr, workers, &handle).unwrap();
 
     let server = listener.incoming().for_each(move |(socket, _)| {
+        let handle = handle.clone();
+        let binder = binder.clone();
+
         // Create the service
-        let service = try!(new_service.new_service());
-
-        // Bind it!
-        binder.bind_server(&handle, socket, WrapService {
-            inner: service,
-            _marker: PhantomData,
-        });
-
-        Ok(())
+        new_service.new_service().map(move |service| {
+            // Bind it!
+            binder.bind_server(&handle, socket, WrapService {
+                inner: service,
+                _marker: PhantomData,
+            });
+        })
     });
 
     core.run(server).unwrap();

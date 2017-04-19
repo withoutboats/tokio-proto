@@ -6,6 +6,7 @@ use std::marker::PhantomData;
 use BindClient;
 use tokio_core::reactor::Handle;
 use tokio_core::net::{TcpStream, TcpStreamNew};
+use tokio_service::NewService;
 use futures::{Future, Poll, Async};
 
 // TODO: add configuration, e.g.:
@@ -27,6 +28,18 @@ use futures::{Future, Poll, Async};
 pub struct TcpClient<Kind, P> {
     _kind: PhantomData<Kind>,
     proto: Arc<P>,
+}
+
+/// A TcpClient bound to an address and event loop.
+///
+/// This implements `NewService`, and can be used as a factory for new client
+/// services.
+#[derive(Debug)]
+pub struct BoundTcpClient<Kind, P> {
+    _kind: PhantomData<Kind>,
+    proto: Arc<P>,
+    addr: SocketAddr,
+    handle: Handle,
 }
 
 /// A future for establishing a client connection.
@@ -74,6 +87,38 @@ impl<Kind, P> TcpClient<Kind, P> where P: BindClient<Kind, TcpStream> {
             proto: self.proto.clone(),
             socket: TcpStream::connect(addr, handle),
             handle: handle.clone(),
+        }
+    }
+
+    /// Bind this client to an address and handle.
+    ///
+    /// # Return value
+    ///
+    /// Returns a factory for constructing new client services, which
+    /// implements the `NewService` trait.
+    pub fn bind(&self, addr: SocketAddr, handle: Handle) -> BoundTcpClient<Kind, P> {
+        BoundTcpClient {
+            _kind: PhantomData,
+            proto: self.proto.clone(),
+            addr: addr,
+            handle: handle,
+        }
+    }
+}
+
+impl<Kind, P> NewService for BoundTcpClient<Kind, P> where P: BindClient<Kind, TcpStream> {
+    type Request = P::ServiceRequest;
+    type Response = P::ServiceResponse;
+    type Error = P::ServiceError;
+    type Instance = P::BindClient;
+    type Future = Connect<Kind, P>;
+
+    fn new_service(&self) -> Self::Future {
+        Connect {
+            _kind: PhantomData,
+            proto: self.proto.clone(),
+            socket: TcpStream::connect(&self.addr, &self.handle),
+            handle: self.handle.clone(),
         }
     }
 }
